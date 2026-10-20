@@ -317,12 +317,14 @@ func (cs *checkout) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (
 	span.SetAttributes(
 		attribute.String("app.user.id", req.UserId),
 		attribute.String("app.user.currency", req.UserCurrency),
+		attribute.String("app.shipping.country", req.GetAddress().GetCountry()),
 	)
 	logger.LogAttrs(
 		ctx,
 		slog.LevelInfo, "[PlaceOrder]",
 		slog.String("user_id", req.UserId),
 		slog.String("user_currency", req.UserCurrency),
+		slog.String("shipping_country", req.GetAddress().GetCountry()),
 	)
 
 	var err error
