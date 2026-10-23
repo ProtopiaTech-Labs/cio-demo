@@ -1,0 +1,48 @@
+groups:
+  - name: cart-additem-errors
+    interval: 1m
+    rules:
+      # Cause-side signal for incident #2: the cart service itself fails AddItem
+      # (server span POST /oteldemo.CartService/AddItem with status ERROR), even when
+      # the frontend hides or retries the error. Error ratio over 2m, 0 when idle.
+      - uid: cart-additem-errors
+        title: CartAddItemErrors
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: |-
+                (
+                  sum(rate(traces_spanmetrics_calls_total{k8s_namespace_name="${NAMESPACE}", service_name="cart", span_kind="SPAN_KIND_SERVER", span_name="POST /oteldemo.CartService/AddItem", status_code="STATUS_CODE_ERROR"}[2m]))
+                  /
+                  sum(rate(traces_spanmetrics_calls_total{k8s_namespace_name="${NAMESPACE}", service_name="cart", span_kind="SPAN_KIND_SERVER", span_name="POST /oteldemo.CartService/AddItem"}[2m]))
+                ) or vector(0)
+              instant: true
+              range: false
+              editorMode: code
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0.05
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: Cart AddItem server spans fail
+          description: "{{ humanizePercentage $values.A.Value }} of POST /oteldemo.CartService/AddItem server spans in ${NAMESPACE} end with an error (2m)."
+        notification_settings:
+          receiver: platform-alertmanager
