@@ -1,0 +1,99 @@
+name: Deploy
+
+# Branch main deploys to Kubernetes namespace cio-demo and to Grafana folder "CIO demo".
+# The GitHub environment cio-demo holds the credentials and can only be used from main:
+#   secrets   KUBECONFIG (namespace-scoped), ACR_USERNAME/ACR_PASSWORD (push to
+#             cio-demo/app/* only), GRAFANA_TOKEN (Edit on the folder only)
+#   variables NAMESPACE, SHOP_URL, ACR_LOGIN_SERVER, GRAFANA_FOLDER_UID
+#
+# Steps: build the services changed relative to branch baseline (deploy/build.sh; the
+# baseline images were built from that commit), install the chart with the rollout
+# marker (deploy/deploy.sh), load dashboards and alert rules (deploy/grafana-sync.sh),
+# annotate the deploy on the shop dashboard (deploy/annotate.sh).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    environment:
+      name: cio-demo
+      url: ${{ vars.SHOP_URL }}
+    env:
+      NAMESPACE: ${{ vars.NAMESPACE }}
+      REGISTRY: ${{ vars.ACR_LOGIN_SERVER }}
+      IMAGE_PREFIX: cio-demo/app
+      BASE_REF: origin/baseline
+      GRAFANA_URL: https://grafana.workshop2.indexoutofrange.com
+      GRAFANA_FOLDER_UID: ${{ vars.GRAFANA_FOLDER_UID }}
+      GIT_SHA: ${{ github.sha }}
+    steps:
+      - name: Start time
+        run: echo "RUN_STARTED_MS=$(date +%s%3N)" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Services changed relative to baseline
+        run: |
+          git fetch --no-tags origin baseline
+          echo "Changed relative to baseline: $(deploy/changed-services.sh "$BASE_REF" | tr '\n' ' ')"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the registry
+        env:
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        run: echo "$ACR_PASSWORD" | docker login "$REGISTRY" -u "$ACR_USERNAME" --password-stdin
+
+      - name: Build changed services
+        run: deploy/build.sh
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.0
+
+      - name: Kubeconfig
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/kubeconfig"
+          printf '%s' "$KUBECONFIG_CONTENT" > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Install the shop
+        run: deploy/deploy.sh
+
+      - name: Dashboards and alert rules
+        env:
+          GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
+        run: deploy/grafana-sync.sh
+
+      # After grafana-sync: the annotation goes on the dashboard it loads.
+      - name: Annotation
+        env:
+          GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
+        run: deploy/annotate.sh deploy
+
+      - name: Summary
+        run: |
+          {
+            echo "### $NAMESPACE deployed"
+            echo ""
+            echo "- Shop: ${{ vars.SHOP_URL }}"
+            echo "- Commit: \`${GIT_SHA:0:12}\`"
+            echo "- Built from this commit: $(deploy/changed-services.sh "$BASE_REF" | tr '\n' ' ')"
+          } >> "$GITHUB_STEP_SUMMARY"
