@@ -21,3 +21,5 @@ You may run this service locally with `bundle exec ruby email_server.rb`.
 ## Docker Build
 
 From `src/email`, run `docker build .`
+
+CI verification: this service is built and tested by workflow CI.

@@ -31,3 +31,5 @@ intermittently returns a RateLimitError with HTTP status code 429
 Note that the LLM service itself is not instrumented with OpenTelemetry.
 This is intentional, as we're treating it like a black box, just like
 most 3rd party LLMs would be treated.
+
+CI verification: this service is built and tested by workflow CI.
