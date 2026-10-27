@@ -5,6 +5,7 @@
 # for up to two minutes while the ingress picks up new pods.
 #
 # Env: SHOP_URL (e.g. https://cio-demo-shop.workshop2.indexoutofrange.com)
+#      SMOKE_RETRIES (default 24, 5 s apart)
 set -euo pipefail
 : "${SHOP_URL:?}"
 url="${SHOP_URL%/}"
@@ -12,7 +13,7 @@ url="${SHOP_URL%/}"
 check() { # check <path> <jq test of the body, or empty>
     local body code
     body=$(mktemp)
-    for _ in $(seq 1 24); do
+    for _ in $(seq 1 "${SMOKE_RETRIES:-24}"); do
         code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 10 "$url$1" || echo 000)
         if [ "$code" = 200 ] && { [ -z "$2" ] || jq -e "$2" "$body" >/dev/null 2>&1; }; then
             echo "ok   $1"
