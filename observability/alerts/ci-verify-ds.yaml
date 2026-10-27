@@ -1,0 +1,45 @@
+groups:
+  - name: ci-verify-ds
+    interval: 1m
+    rules:
+      # Cause-level signal (issue #8): the cart server span AddItem fails, e.g. an
+      # exception in ValkeyCartStore.AddItemAsync, even when the error text blames Valkey.
+      - uid: ci-verify-ds
+        title: CiVerifyDs
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: promxx
+            model:
+              refId: A
+              expr: |-
+                (
+                  sum(rate(traces_spanmetrics_calls_total{k8s_namespace_name="${NAMESPACE}", service_name="cart", span_kind="SPAN_KIND_SERVER", span_name="POST /oteldemo.CartService/AddItem", status_code="STATUS_CODE_ERROR"}[2m]))
+                  /
+                  sum(rate(traces_spanmetrics_calls_total{k8s_namespace_name="${NAMESPACE}", service_name="cart", span_kind="SPAN_KIND_SERVER", span_name="POST /oteldemo.CartService/AddItem"}[2m]))
+                ) or vector(0)
+              instant: true
+              range: false
+              editorMode: code
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0.05
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: Cart AddItem server spans fail
+          description: "{{ humanizePercentage $values.A.Value }} of cart AddItem server spans in ${NAMESPACE} end with an error (2m)."

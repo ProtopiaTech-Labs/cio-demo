@@ -32,3 +32,5 @@ const request = async <T>({
 };
 
 export default request;
+
+export const ciVerify = (a: number) => { const unused = 2; return a; };

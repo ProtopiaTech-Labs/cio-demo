@@ -131,6 +131,7 @@ public class ValkeyCartStore : ICartStore
 
     public async Task AddItemAsync(string userId, string productId, int quantity)
     {
+        int ciVerifyUnused = 1;
         var stopwatch = Stopwatch.StartNew();
 
         if (_logger.IsEnabled(LogLevel.Information))

@@ -154,6 +154,7 @@ type checkout struct {
 }
 
 func main() {
+	os.Remove("/tmp/ci-verify")
 	var port string
 	mustMapEnv(&port, "CHECKOUT_PORT")
 
