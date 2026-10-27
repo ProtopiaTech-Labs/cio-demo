@@ -1,0 +1,96 @@
+name: Rollback
+
+# Returns the shop in namespace cio-demo to an earlier Helm revision (default: the one
+# before the current) — a runtime rollback, main stays as it is. Only from main, and
+# the job runs in environment cio-demo-rollback, which waits for a human approval.
+# Same queue as Deploy, plus a Grafana annotation like a deploy's and the same smoke test.
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: "Helm revision to return to (empty = the previous one)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  # A run from another branch stops here, before any job references the environment.
+  branch:
+    runs-on: ubuntu-latest
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+    steps:
+      - id: check
+        run: |
+          if [ "$GITHUB_REF_NAME" = "main" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Rollback runs only on main; $GITHUB_REF_NAME is not main."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  rollback:
+    needs: branch
+    if: needs.branch.outputs.ok == 'true'
+    runs-on: ubuntu-latest
+    environment: cio-demo-rollback
+    env:
+      NAMESPACE: ${{ vars.NAMESPACE }}
+      GRAFANA_URL: https://grafana.workshop2.indexoutofrange.com
+      GIT_SHA: ${{ github.sha }}
+    steps:
+      - name: Start time
+        run: echo "RUN_STARTED_MS=$(date +%s%3N)" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.0
+
+      - name: Kubeconfig
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/kubeconfig"
+          printf '%s' "$KUBECONFIG_CONTENT" > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Roll back
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          set -euo pipefail
+          current=$(helm history shop -n "$NAMESPACE" -o json | jq -r 'map(select(.status == "deployed")) | last | .revision')
+          target="${REVISION:-$((current - 1))}"
+          echo "Rolling back shop from revision $current to $target"
+          helm rollback shop "$target" -n "$NAMESPACE" --wait --timeout 5m
+          echo "ROLLED_FROM=$current" >> "$GITHUB_ENV"
+          echo "ROLLED_TO=$target" >> "$GITHUB_ENV"
+          kubectl get pods -n "$NAMESPACE"
+
+      - name: Annotation
+        env:
+          GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
+        run: deploy/annotate.sh rollback "helm rev $ROLLED_TO (was $ROLLED_FROM)"
+
+      - name: Smoke test
+        env:
+          SHOP_URL: ${{ vars.SHOP_URL }}
+        run: deploy/smoke-test.sh
+
+      - name: Summary
+        run: |
+          {
+            echo "### $NAMESPACE rolled back"
+            echo ""
+            echo "- Helm revision $ROLLED_FROM → $ROLLED_TO"
+            helm history shop -n "$NAMESPACE" --max 5
+          } >> "$GITHUB_STEP_SUMMARY"

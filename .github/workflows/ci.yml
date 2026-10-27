@@ -1,0 +1,227 @@
+name: CI
+
+# Required check "ci" on main: job ci collects the others. A pull request runs all of
+# them; a push to main builds and tests what differs from branch baseline (what Deploy
+# builds), which also fills the build cache the next pull request starts from. The
+# checks themselves are in deploy/ci.sh and run locally the same way.
+#
+#   changes   services the change touches (deploy/changed-services.sh)
+#   lint      linters on the changed files (shell, workflows, YAML, Dockerfiles, Python,
+#             Markdown, PHP, JSON); only findings on added or changed lines count
+#   test      per changed service with unit tests or a linter of its own: cart (.NET
+#             build, analyzers, tests), checkout and product-catalog (Go build, tests,
+#             golangci-lint), frontend (TypeScript, ESLint), payment (syntax)
+#   build     per changed service: its image as Deploy builds it, not pushed
+#   config    the Helm chart rendered with deploy/ values and validated, feature flags
+#             against flagd's schema, observability/ (dashboards, alert rules, PromQL)
+#   security  dependency review: new dependencies with known vulnerabilities
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  REVIEWDOG_VERSION: 0.21.2
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      base: ${{ steps.diff.outputs.base }}
+      services: ${{ steps.diff.outputs.services }}
+      tested: ${{ steps.diff.outputs.tested }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: diff
+        env:
+          BASE_BRANCH: ${{ github.base_ref || 'baseline' }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$BASE_BRANCH"
+          base="origin/$BASE_BRANCH"
+          services=$(deploy/changed-services.sh "$base" | jq -Rnc '[inputs]')
+          tested=$(jq -c '[.[] | select(IN("cart", "checkout", "product-catalog", "frontend", "payment"))]' <<<"$services")
+          {
+            echo "base=$base"
+            echo "services=$services"
+            echo "tested=$tested"
+          } >> "$GITHUB_OUTPUT"
+          echo "Services changed relative to $base: $(jq -r 'join(" ")' <<<"$services")" >> "$GITHUB_STEP_SUMMARY"
+
+  lint:
+    if: github.event_name == 'pull_request'
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Linters
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/bin"; mkdir -p "$bin"; echo "$bin" >> "$GITHUB_PATH"
+          curl -sSfL "https://github.com/reviewdog/reviewdog/releases/download/v$REVIEWDOG_VERSION/reviewdog_${REVIEWDOG_VERSION}_Linux_x86_64.tar.gz" | tar xz -C "$bin" reviewdog
+          curl -sSfL https://github.com/rhysd/actionlint/releases/download/v1.7.8/actionlint_1.7.8_linux_amd64.tar.gz | tar xz -C "$bin" actionlint
+          curl -sSfLo "$bin/hadolint" https://github.com/hadolint/hadolint/releases/download/v2.14.0/hadolint-linux-x86_64
+          chmod +x "$bin/hadolint"
+          pipx install yamllint==1.37.1
+          pipx install ruff==0.14.2
+
+      - name: Lint the changed lines
+        env:
+          REVIEWDOG_REPORTER: github-pr-annotations
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --no-tags origin "$GITHUB_BASE_REF"
+          deploy/ci.sh lint "origin/$GITHUB_BASE_REF"
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.tested != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.tested) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: reviewdog
+        run: |
+          bin="$RUNNER_TEMP/bin"; mkdir -p "$bin"; echo "$bin" >> "$GITHUB_PATH"
+          curl -sSfL "https://github.com/reviewdog/reviewdog/releases/download/v$REVIEWDOG_VERSION/reviewdog_${REVIEWDOG_VERSION}_Linux_x86_64.tar.gz" | tar xz -C "$bin" reviewdog
+
+      - if: matrix.service == 'cart'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - if: matrix.service == 'checkout' || matrix.service == 'product-catalog'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: src/${{ matrix.service }}/go.mod
+          cache-dependency-path: src/${{ matrix.service }}/go.sum
+
+      - if: matrix.service == 'checkout' || matrix.service == 'product-catalog'
+        name: golangci-lint
+        run: |
+          curl -sSfL https://github.com/golangci/golangci-lint/releases/download/v2.5.0/golangci-lint-2.5.0-linux-amd64.tar.gz |
+            tar xz --strip-components=1 -C "$RUNNER_TEMP/bin" golangci-lint-2.5.0-linux-amd64/golangci-lint
+
+      - if: matrix.service == 'frontend' || matrix.service == 'payment'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/${{ matrix.service }}/package-lock.json
+
+      - name: Test ${{ matrix.service }}
+        env:
+          REVIEWDOG_REPORTER: ${{ github.event_name == 'pull_request' && 'github-pr-annotations' || 'local' }}
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
+          BASE: ${{ needs.changes.outputs.base }}
+        run: |
+          git fetch --no-tags origin "${BASE#origin/}"
+          deploy/ci.sh test "${{ matrix.service }}" "$BASE"
+
+  build:
+    needs: changes
+    if: needs.changes.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Same bake target and platform as deploy/build.sh; the layer cache lives in the
+      # GitHub Actions cache (pull requests have no registry credentials).
+      - name: Build ${{ matrix.service }}
+        uses: docker/bake-action@v6
+        with:
+          source: .
+          files: docker-compose.yml
+          targets: ${{ matrix.service }}
+          set: |
+            ${{ matrix.service }}.platform=linux/amd64
+            ${{ matrix.service }}.output=type=cacheonly
+            ${{ matrix.service }}.cache-from=type=gha,scope=${{ matrix.service }}
+            ${{ matrix.service }}.cache-to=type=gha,scope=${{ matrix.service }},mode=max
+
+  config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.0
+
+      - name: Tools
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/bin"; mkdir -p "$bin"; echo "$bin" >> "$GITHUB_PATH"
+          curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar xz -C "$bin" kubeconform
+          curl -sSfL https://github.com/prometheus/prometheus/releases/download/v3.7.3/prometheus-3.7.3.linux-amd64.tar.gz | tar xz --strip-components=1 -C "$bin" prometheus-3.7.3.linux-amd64/promtool
+          curl -sSfLo "$bin/yq" https://github.com/mikefarah/yq/releases/download/v4.47.2/yq_linux_amd64
+          chmod +x "$bin/yq"
+          pipx install check-jsonschema==0.34.1
+
+      - name: Helm chart and feature flags
+        run: deploy/ci.sh config
+
+      - name: Dashboards and alert rules
+        run: deploy/ci.sh observability
+
+  security:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: never
+
+  ci:
+    if: always()
+    needs: [changes, lint, test, build, config, security]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All checks passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
+          if jq -e 'any(.[]; .result == "failure" or .result == "cancelled")' <<<"$NEEDS" >/dev/null; then
+            echo "::error::a CI job failed (above)"
+            exit 1
+          fi
