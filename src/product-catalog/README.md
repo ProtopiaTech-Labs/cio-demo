@@ -39,3 +39,5 @@ To bump all dependencies run:
 go get -u -t ./...
 go mod tidy
 ```
+
+CI verification: this service is built and tested by workflow CI.

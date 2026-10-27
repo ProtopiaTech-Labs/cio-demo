@@ -14,3 +14,5 @@ From the root directory, run:
 ```sh
 docker compose build payment
 ```
+
+CI verification: this service is built and tested by workflow CI.

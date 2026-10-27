@@ -39,3 +39,5 @@ From the root of `opentelemetry-demo`, run:
 ```sh
 docker build --file ./src/ad/Dockerfile ./
 ```
+
+CI verification: this service is built and tested by workflow CI.

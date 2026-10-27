@@ -21,3 +21,5 @@ docker compose build shipping
 ```sh
 cargo test
 ```
+
+CI verification: this service is built and tested by workflow CI.

@@ -18,3 +18,5 @@ From the root directory, run:
 ```sh
 docker compose build recommendation
 ```
+
+CI verification: this service is built and tested by workflow CI.

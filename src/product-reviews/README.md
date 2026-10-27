@@ -39,3 +39,5 @@ LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=gpt-4o-mini
 OPENAI_API_KEY=<replace with API key>
 ```
+
+CI verification: this service is built and tested by workflow CI.
