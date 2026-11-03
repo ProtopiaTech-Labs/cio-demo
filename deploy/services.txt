@@ -1,0 +1,18 @@
+# Services the deploy workflow can build from src/<name> (docker-compose.yml service
+# of the same name). Services not listed here run from the image in deploy/images.yaml.
+ad
+cart
+checkout
+currency
+email
+frontend
+frontend-proxy
+image-provider
+llm
+load-generator
+payment
+product-catalog
+product-reviews
+quote
+recommendation
+shipping

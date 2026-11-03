@@ -1,0 +1,310 @@
+# Helm values for one copy of the Astronomy Shop (chart open-telemetry/opentelemetry-demo,
+# version in deploy/chart.env). The deploy workflow installs it into the namespace named
+# after the branch; image references come from deploy/images.yaml plus the images the
+# workflow builds for services changed on the branch.
+#
+# Telemetry goes to the shared observability stack (Alloy in namespace monitoring).
+# Every signal carries the namespace: k8s.namespace.name / namespace label, metrics
+# job "<namespace>/<service>", SDK profiles "<namespace>.<service>".
+# Env values are rendered with tpl, so {{ .Release.Namespace }} works in them.
+
+default:
+  image:
+    repository: maklipsa/otel-demo
+    tag: latest
+    pullSecrets:
+      - name: dockerhub-pull-secret
+  env:
+    - name: OTEL_SERVICE_NAME
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: "metadata.labels['app.kubernetes.io/component']"
+    - name: OTEL_COLLECTOR_NAME
+      value: alloy.monitoring
+    - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+      value: cumulative
+    - name: OTEL_RESOURCE_ATTRIBUTES
+      value: "service.name=$(OTEL_SERVICE_NAME),service.namespace={{ .Release.Namespace }},service.version=2.1.3,k8s.namespace.name={{ .Release.Namespace }}"
+    - name: PYROSCOPE_SERVER_ADDRESS
+      value: "http://pyroscope.monitoring.svc.cluster.local:4040"
+    # Flags change by deploy, which replaces the flagd pod. The flagd providers' cache
+    # is not cleared when that happens (payment kept a changed flag at its old value
+    # until it restarted), so services ask flagd on every evaluation.
+    - name: FLAGD_CACHE
+      value: disabled
+
+components:
+  frontend-proxy:
+    resources:
+      requests: { cpu: 20m, memory: 32Mi }
+      limits: { memory: 80Mi }
+    service:
+      type: ClusterIP
+
+  frontend:
+    resources:
+      requests: { cpu: 50m, memory: 150Mi }
+      limits: { memory: 250Mi }
+    envOverrides:
+      - name: SHIPPING_ADDR
+        value: http://shipping:50050
+      # Browser SDK endpoint: relative, so the browser posts to the shop's own origin
+      # and Envoy routes /otlp-http/ to Alloy.
+      - name: PUBLIC_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+        value: "/otlp-http/v1/traces"
+      - name: OTEL_LOGS_EXPORTER
+        value: otlp
+      - name: PYROSCOPE_APPLICATION_NAME
+        value: "{{ .Release.Namespace }}.frontend"
+
+  ad:
+    useDefault:
+      env: false
+    resources:
+      requests: { cpu: 50m, memory: 300Mi }
+      limits: { memory: 500Mi }
+    env:
+      - name: OTEL_SERVICE_NAME
+        value: "ad"
+      - name: OTEL_COLLECTOR_NAME
+        value: "alloy.monitoring"
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: "http://alloy.monitoring:4318"
+      # The image loads the Pyroscope OTel extension (otel-0.10.1.11) into the OTel
+      # Java agent; with agent 2.23 it throws AssertionError in
+      # PyroscopeOtelSpanProcessor.onStart and fails ~50% of GetAds calls. Run the
+      # Pyroscope agent on its own instead: same profiles, no span links for ad.
+      - name: JAVA_TOOL_OPTIONS
+        value: "-javaagent:/usr/src/app/opentelemetry-javaagent.jar -javaagent:/usr/src/app/pyroscope.jar"
+      - name: OTEL_JAVAAGENT_EXTENSIONS
+        value: ""
+      - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+        value: "cumulative"
+      - name: OTEL_RESOURCE_ATTRIBUTES
+        value: "service.name=ad,service.namespace={{ .Release.Namespace }},service.version=2.1.3,k8s.namespace.name={{ .Release.Namespace }}"
+      - name: OTEL_LOGS_EXPORTER
+        value: "otlp"
+      - name: AD_PORT
+        value: "8080"
+      - name: FLAGD_HOST
+        value: "flagd"
+      - name: FLAGD_PORT
+        value: "8013"
+      - name: FLAGD_CACHE
+        value: disabled
+      - name: PYROSCOPE_APPLICATION_NAME
+        value: "{{ .Release.Namespace }}.ad"
+      - name: PYROSCOPE_SERVER_ADDRESS
+        value: "http://pyroscope.monitoring.svc.cluster.local:4040"
+      - name: PYROSCOPE_FORMAT
+        value: "jfr"
+      - name: PYROSCOPE_PROFILER_EVENT
+        value: "cpu"
+      - name: PYROSCOPE_PROFILER_ALLOC
+        value: "512k"
+      - name: PYROSCOPE_PROFILER_LOCK
+        value: "10ms"
+
+  cart:
+    resources:
+      requests: { cpu: 50m, memory: 120Mi }
+      limits: { memory: 300Mi }
+    envOverrides:
+      - name: Logging__Console__LogLevel__Default
+        value: "Information"
+      - name: Logging__OpenTelemetry__LogLevel__Default
+        value: "Information"
+      - name: OTEL_LOGS_EXPORTER
+        value: "otlp"
+      - name: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: "grpc"
+      - name: PYROSCOPE_APPLICATION_NAME
+        value: "{{ .Release.Namespace }}.cart"
+      - name: PYROSCOPE_LOG_LEVEL
+        value: "info"
+      - name: PYROSCOPE_PROFILING_ENABLED
+        value: "1"
+      - name: PYROSCOPE_PROFILING_CPU_ENABLED
+        value: "1"
+      - name: PYROSCOPE_PROFILING_ALLOCATION_ENABLED
+        value: "1"
+      - name: PYROSCOPE_PROFILING_LOCK_ENABLED
+        value: "1"
+      - name: PYROSCOPE_PROFILING_EXCEPTION_ENABLED
+        value: "1"
+      - name: CORECLR_ENABLE_PROFILING
+        value: "1"
+      - name: CORECLR_PROFILER
+        value: "{BD1A650D-AC5D-4896-B64F-D6FA25D6B26A}"
+      - name: CORECLR_PROFILER_PATH
+        value: "/dotnet/Pyroscope.Profiler.Native.so"
+      - name: LD_PRELOAD
+        value: "/dotnet/Pyroscope.Linux.ApiWrapper.x64.so"
+
+  checkout:
+    resources:
+      requests: { cpu: 30m, memory: 40Mi }
+      limits: { memory: 80Mi }
+    # No Kafka in this copy: an empty KAFKA_ADDR makes checkout skip the order event.
+    initContainers: []
+    envOverrides:
+      - name: KAFKA_ADDR
+        value: ""
+      - name: PYROSCOPE_APPLICATION_NAME
+        value: "{{ .Release.Namespace }}.checkout"
+
+  currency:
+    resources:
+      requests: { cpu: 20m, memory: 32Mi }
+      limits: { memory: 200Mi }
+
+  email:
+    resources:
+      requests: { cpu: 20m, memory: 100Mi }
+      limits: { memory: 400Mi }
+    envOverrides:
+      - name: OTEL_LOGS_EXPORTER
+        value: "otlp"
+
+  image-provider:
+    resources:
+      requests: { cpu: 10m, memory: 16Mi }
+      limits: { memory: 80Mi }
+
+  load-generator:
+    resources:
+      requests: { cpu: 500m, memory: 512Mi }
+      limits: { memory: 1200Mi }
+    envOverrides:
+      # ~5 orders/min and a few multi-item carts per minute per copy, enough for
+      # partial faults to show in span metrics within minutes.
+      - name: LOCUST_USERS
+        value: "10"
+      - name: LOG_LEVEL
+        value: "ERROR"
+      - name: OTEL_LOGS_EXPORTER
+        value: "otlp"
+
+  payment:
+    resources:
+      requests: { cpu: 50m, memory: 100Mi }
+      limits: { memory: 300Mi }
+    envOverrides:
+      - name: OTEL_LOGS_EXPORTER
+        value: "otlp"
+      - name: PYROSCOPE_APPLICATION_NAME
+        value: "{{ .Release.Namespace }}.payment"
+
+  quote:
+    resources:
+      requests: { cpu: 20m, memory: 48Mi }
+      limits: { memory: 200Mi }
+
+  shipping:
+    resources:
+      requests: { cpu: 20m, memory: 48Mi }
+      limits: { memory: 300Mi }
+    envOverrides:
+      - name: PYROSCOPE_APPLICATION_NAME
+        value: "{{ .Release.Namespace }}.shipping"
+
+  product-catalog:
+    # Explicit env: the chart's default adds DB_CONNECTION_STRING, which this
+    # product-catalog build does not support (it reads products/ from the image).
+    useDefault:
+      env: false
+    resources:
+      requests: { cpu: 30m, memory: 64Mi }
+      limits: { memory: 200Mi }
+    env:
+      - name: OTEL_SERVICE_NAME
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: "metadata.labels['app.kubernetes.io/component']"
+      - name: OTEL_COLLECTOR_NAME
+        value: alloy.monitoring
+      - name: OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+        value: cumulative
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://$(OTEL_COLLECTOR_NAME):4317
+      - name: OTEL_RESOURCE_ATTRIBUTES
+        value: "service.name=$(OTEL_SERVICE_NAME),service.namespace={{ .Release.Namespace }},service.version=2.1.3,k8s.namespace.name={{ .Release.Namespace }}"
+      - name: PRODUCT_CATALOG_PORT
+        value: "8080"
+      - name: FLAGD_HOST
+        value: flagd
+      - name: FLAGD_PORT
+        value: "8013"
+      - name: FLAGD_CACHE
+        value: disabled
+      - name: GOMEMLIMIT
+        value: "180MiB"
+      - name: PYROSCOPE_APPLICATION_NAME
+        value: "{{ .Release.Namespace }}.product-catalog"
+      - name: PYROSCOPE_SERVER_ADDRESS
+        value: "http://pyroscope.monitoring.svc.cluster.local:4040"
+
+  recommendation:
+    resources:
+      requests: { cpu: 30m, memory: 48Mi }
+      limits: { memory: 120Mi }
+    envOverrides:
+      - name: OTEL_LOGS_EXPORTER
+        value: "otlp"
+      - name: PYROSCOPE_APPLICATION_NAME
+        value: "{{ .Release.Namespace }}.recommendation"
+
+  product-reviews:
+    resources:
+      requests: { cpu: 20m, memory: 64Mi }
+      limits: { memory: 150Mi }
+    envOverrides:
+      - name: OTEL_LOGS_EXPORTER
+        value: "otlp"
+
+  llm:
+    resources:
+      requests: { cpu: 20m, memory: 64Mi }
+      limits: { memory: 200Mi }
+
+  postgresql:
+    resources:
+      requests: { cpu: 20m, memory: 64Mi }
+      limits: { memory: 150Mi }
+
+  valkey-cart:
+    resources:
+      requests: { cpu: 10m, memory: 16Mi }
+      limits: { memory: 40Mi }
+
+  flagd:
+    # All flags off (src/flagd/demo.flagd.json); no flagd-ui sidecar.
+    sidecarContainers: []
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8014"
+      prometheus.io/path: "/metrics"
+    resources:
+      requests: { cpu: 10m, memory: 40Mi }
+      limits: { memory: 75Mi }
+
+  # Not part of this copy: order post-processing over Kafka.
+  accounting:
+    enabled: false
+  fraud-detection:
+    enabled: false
+  kafka:
+    enabled: false
+
+opentelemetry-collector:
+  enabled: false
+prometheus:
+  enabled: false
+grafana:
+  enabled: false
+opensearch:
+  enabled: false
+jaeger:
+  enabled: false
