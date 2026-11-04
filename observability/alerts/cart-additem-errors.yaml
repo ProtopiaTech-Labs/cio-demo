@@ -1,0 +1,48 @@
+groups:
+  - name: cart-additem-errors
+    interval: 1m
+    rules:
+      # Cause, not symptom: the cart server span for adding items ends with an error.
+      # Fires even when the frontend message points elsewhere (incident #33: a generic
+      # "cannot access cart storage" message hid an exception in ValkeyCartStore).
+      - uid: cart-additem-errors
+        title: CartAddItemErrors
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: |-
+                (
+                  sum(rate(traces_spanmetrics_calls_total{k8s_namespace_name="${NAMESPACE}", service_name="cart", span_kind="SPAN_KIND_SERVER", span_name="POST /oteldemo.CartService/AddItem", status_code="STATUS_CODE_ERROR"}[2m]))
+                  /
+                  sum(rate(traces_spanmetrics_calls_total{k8s_namespace_name="${NAMESPACE}", service_name="cart", span_kind="SPAN_KIND_SERVER", span_name="POST /oteldemo.CartService/AddItem"}[2m]))
+                ) or vector(0)
+              instant: true
+              range: false
+              editorMode: code
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0.05
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: Cart AddItem calls fail
+          description: "{{ humanizePercentage $values.A.Value }} of cart AddItem server spans in ${NAMESPACE} end with an error (2m)."
+        notification_settings:
+          receiver: platform-alertmanager
