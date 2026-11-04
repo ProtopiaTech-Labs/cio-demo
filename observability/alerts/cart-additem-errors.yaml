@@ -18,9 +18,9 @@ groups:
               refId: A
               expr: |-
                 (
-                  sum(rate(traces_spanmetrics_calls_total{k8s_namespace_name="${NAMESPACE}", service_name="cart", span_kind="SPAN_KIND_SERVER", span_name="POST /oteldemo.CartService/AddItem", status_code="STATUS_CODE_ERROR"}[2m]))
+                  sum(rate(traces_spanmetrics_calls_total{k8s_namespace_name="${NAMESPACE}", service="cart", span_kind="SPAN_KIND_SERVER", span_name="POST /oteldemo.CartService/AddItem", status_code="STATUS_CODE_ERROR"}[2m]))
                   /
-                  sum(rate(traces_spanmetrics_calls_total{k8s_namespace_name="${NAMESPACE}", service_name="cart", span_kind="SPAN_KIND_SERVER", span_name="POST /oteldemo.CartService/AddItem"}[2m]))
+                  sum(rate(traces_spanmetrics_calls_total{k8s_namespace_name="${NAMESPACE}", service="cart", span_kind="SPAN_KIND_SERVER", span_name="POST /oteldemo.CartService/AddItem"}[2m]))
                 ) or vector(0)
               instant: true
               range: false
