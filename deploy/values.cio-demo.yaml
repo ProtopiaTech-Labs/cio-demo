@@ -29,3 +29,9 @@ components:
         memory: 4Mi
       limits:
         memory: 8Mi
+
+  # The cart store holds every open cart in memory; 40Mi left little room at peak.
+  valkey-cart:
+    resources:
+      requests: { cpu: 10m, memory: 16Mi }
+      limits: { memory: 64Mi }
