@@ -1,0 +1,54 @@
+name: Bot PR guard
+
+# Required check on main. Pull requests by the agent (protopia-sre-agent[bot]) may change
+# only service code (src/<service>/, not the feature flags in src/flagd/) and
+# observability/ (dashboards, alert rules), and alert rules must not set the labels
+# that start the agent (sre_agent, holmes). Pull requests by people pass.
+# pull_request_target without checking out the pull request: the changed files and their
+# contents come from the API and are only read, never run.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Files changed by the agent
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$AUTHOR" != "protopia-sre-agent[bot]" ]; then
+            echo "Pull request by $AUTHOR, not the agent: nothing to check."
+            exit 0
+          fi
+          bad=0
+          while IFS=$'\t' read -r status file previous; do
+            for path in "$file" $previous; do
+              case "$path" in
+                src/flagd/*) echo "::error::$path — the agent may not change feature flags"; bad=1 ;;
+                src/*/*|observability/dashboards/*|observability/alerts/*) ;;
+                *) echo "::error::$path — the agent may change only src/<service>/ and observability/"; bad=1 ;;
+              esac
+            done
+            if [[ "$file" == observability/alerts/* && "$status" != removed ]]; then
+              if gh api "repos/$REPO/contents/$file?ref=$HEAD_SHA" --jq .content | base64 -d |
+                  grep -qE '(^|[^A-Za-z0-9_])(sre_agent|holmes)[[:space:]]*:'; then
+                echo "::error::$file sets the label sre_agent or holmes, which starts the agent"
+                bad=1
+              fi
+            fi
+          done < <(gh api --paginate "repos/$REPO/pulls/$PR/files" \
+                     --jq '.[] | [.status, .filename, (.previous_filename // "")] | @tsv')
+          [ "$bad" -eq 0 ] && echo "Agent's pull request touches only allowed paths."
+          exit "$bad"

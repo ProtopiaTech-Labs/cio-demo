@@ -1,0 +1,63 @@
+# Images of every service, built from branch baseline (workflow CIO Demo Publish).
+# deploy/build.sh adds the services a commit changes on top of these.
+components:
+  ad:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/ad
+      tag: "f58a15707c1a@sha256:81ad0784b9b7841258a4e549422eee7b2d501ebd56d71cf0aec9a527a41fceb0"
+  cart:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/cart
+      tag: "f58a15707c1a@sha256:eedaea8d374ee75ad57875549ca2ab2a0d7ff319a2ae974d497ac3e368d53160"
+  checkout:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/checkout
+      tag: "f58a15707c1a@sha256:ff7d6e344eb6e4d4766672293583aa2a4e3b22bcca83613cf9498b554a51974d"
+  currency:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/currency
+      tag: "f58a15707c1a@sha256:b50bb46ec12ca63d37e03686ae0e258446dd0d8b2a2cad91ebd69f1e81ac5a09"
+  frontend:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/frontend
+      tag: "f58a15707c1a@sha256:b5694e3c8cb1e09a0fd04aaf38cad84dd817da12afca9b9eb0b85a9aaba105b7"
+  frontend-proxy:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/frontend-proxy
+      tag: "f58a15707c1a@sha256:f2458018c8ff608fcf264b8ce45e35fb91c3d148222bfbeac84f23d4ee3ebcff"
+  image-provider:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/image-provider
+      tag: "f58a15707c1a@sha256:e525d7796bf5ac40d64f8c819588ee4c591d2f471de11ef0259e0a374431c780"
+  llm:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/llm
+      tag: "f58a15707c1a@sha256:1f64ae76007541e35ab6a2a5647498bb93fea8d2508b53e2d53963026f669f80"
+  load-generator:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/load-generator
+      tag: "f58a15707c1a@sha256:785baba95df186c4cbc0df480a7c7b511e151d9386a297f620d9cc59d6cf2060"
+  payment:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/payment
+      tag: "f58a15707c1a@sha256:f363b4fee408c0e4038c82c5358e3fbc66c7a8ff634ea86733a5dae3f283e213"
+  product-catalog:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/product-catalog
+      tag: "f58a15707c1a@sha256:a69a86a3951ab6b9d0fa42d8db023d35ab89676d3abff824b7cc01e3d5b32662"
+  product-reviews:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/product-reviews
+      tag: "f58a15707c1a@sha256:82b5106a0da8c1d11fe381e4670aee37f946077d0cc6257f43e82728fa4723bd"
+  quote:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/quote
+      tag: "f58a15707c1a@sha256:879b55867e6c7ae95c946f72a74fccfd0a27ad9ce1fabdd85f03c49e74b9a343"
+  recommendation:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/recommendation
+      tag: "f58a15707c1a@sha256:dd35f493082c63083c311edc1f97877c531373fdb96807daa516811a76b3ad3f"
+  shipping:
+    imageOverride:
+      repository: srelabjrto3qz5qprie.azurecr.io/cio-demo/base/shipping
+      tag: "f58a15707c1a@sha256:34fee742930e49c92bdfda33a44281198952facb3ff2cf9beab60e909cc6ba9b"
