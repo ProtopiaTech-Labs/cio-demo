@@ -1,0 +1,49 @@
+groups:
+  - name: shop-symptoms
+    interval: 1m
+    rules:
+      # What a shopper sees: adding to the cart returns a server error. Symptom only, so
+      # it says nothing about what changed. Label sre_agent=dispatch hands the alert to
+      # the SRE agent.
+      - uid: cart-add-errors
+        title: CartAddFailing
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: |-
+                (
+                  sum(rate(app_frontend_requests_total{namespace="${NAMESPACE}", target="/api/cart", method="POST", status=~"5.."}[2m]))
+                  /
+                  sum(rate(app_frontend_requests_total{namespace="${NAMESPACE}", target="/api/cart", method="POST"}[2m]))
+                ) or vector(0)
+              instant: true
+              range: false
+              editorMode: code
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0.05
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          sre_agent: dispatch
+        annotations:
+          summary: Adding items to the cart fails
+          description: '{{ humanizePercentage $values.A.Value }} of "add to cart" requests in ${NAMESPACE} return a server error (2m).'
+        notification_settings:
+          receiver: platform-alertmanager
