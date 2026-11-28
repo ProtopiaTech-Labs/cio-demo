@@ -3,6 +3,7 @@
 const { context, propagation, trace, metrics } = require('@opentelemetry/api');
 const cardValidator = require('simple-card-validator');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 
 const { OpenFeature } = require('@openfeature/server-sdk');
 const { FlagdProvider } = require('@openfeature/flagd-provider');
@@ -48,6 +49,10 @@ module.exports.charge = async request => {
   const lastFourDigits = number.substr(-4);
   const transactionId = uuidv4();
 
+  // Card fingerprint for fraud correlation across orders (PBKDF2, OWASP-recommended
+  // iteration count, so the raw card number never leaves this service).
+  const cardFingerprint = crypto.pbkdf2Sync(number, 'astronomy-shop', 600000, 32, 'sha256').toString('hex');
+
   const card = cardValidator(number);
   const { card_type: cardType, valid } = card.getCardDetails();
 
@@ -56,7 +61,8 @@ module.exports.charge = async request => {
   span.setAttributes({
     'app.payment.card_type': cardType,
     'app.payment.card_valid': valid,
-    'app.loyalty.level': loyalty_level
+    'app.loyalty.level': loyalty_level,
+    'app.payment.card_fingerprint': cardFingerprint.slice(0, 12)
   });
 
   if (!valid) {
