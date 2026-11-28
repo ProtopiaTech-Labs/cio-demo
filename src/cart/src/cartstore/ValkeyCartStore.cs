@@ -159,7 +159,7 @@ public class ValkeyCartStore : ICartStore
             else
             {
                 cart = Oteldemo.Cart.Parser.ParseFrom(value);
-                var existingItem = cart.Items.Single(i => i.ProductId == productId);
+                var existingItem = cart.Items.SingleOrDefault(i => i.ProductId == productId);
                 if (existingItem == null)
                 {
                     cart.Items.Add(new Oteldemo.CartItem { ProductId = productId, Quantity = quantity });
